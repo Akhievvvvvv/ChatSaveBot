@@ -1,164 +1,85 @@
-import logging
 import asyncio
-from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.utils import executor
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from datetime import datetime, timedelta
+import json, os
 
-# === НАСТРОЙКИ ===
-TOKEN = "8253356529:AAG5sClokG30SlhqpP3TNMdl6TajExIE7YU"
-ADMIN_GROUP_ID = -1002593269045  # твоя админ-группа
-TRIAL_DAYS = 7
-SUB_PRICE = "99₽ / месяц"
-PAY_DETAILS = "💳 89322229930\n🏦 Ozon Банк\n💰 99₽/мес"
+from config import TOKEN, ADMIN_ID, TARIFFS, BANK_REQUISITES, FREE_DAYS
+from utils import load_users, save_users, add_message
 
-bot = Bot(token=TOKEN, parse_mode="HTML")
+bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
 
-# Словарь для хранения пользователей
-users = {}  # user_id: {trial_end, sub_end, referred_by, referrals, active}
+users = load_users()
 
-# === ЛОГИ ===
-logging.basicConfig(level=logging.INFO)
+# ====== Helpers ======
+def get_user_data(user_id):
+    return users.get(str(user_id), {"sub_end": None, "referrals": [], "bonus_active": False})
 
+def save_user_data(user_id, data):
+    users[str(user_id)] = data
+    save_users(users)
 
-# === КНОПКИ ===
-def main_menu():
-    kb = InlineKeyboardMarkup()
-    kb.add(InlineKeyboardButton("⚙️ Активировать бота", callback_data="activate"))
+# ====== Inline menus ======
+def menu_main():
+    kb = InlineKeyboardMarkup(row_width=1)
+    kb.add(
+        InlineKeyboardButton("📜 Посмотреть тарифы", callback_data="tariffs"),
+        InlineKeyboardButton("💳 Оплатил(а)", callback_data="paid"),
+        InlineKeyboardButton("👥 Моя реферальная ссылка", callback_data="referral")
+    )
     return kb
 
-
-def pay_menu():
-    kb = InlineKeyboardMarkup()
-    kb.add(InlineKeyboardButton("👀 Посмотреть реквизиты", callback_data="pay_info"))
+def menu_tariffs():
+    kb = InlineKeyboardMarkup(row_width=1)
+    for name, price in TARIFFS.items():
+        kb.add(InlineKeyboardButton(f"{name.replace('_',' ')} — {price}₽", callback_data=f"buy_{name}"))
     return kb
 
-
-def paid_button(user_id):
-    kb = InlineKeyboardMarkup()
-    kb.add(InlineKeyboardButton("✅ Оплатил(а)", callback_data=f"paid_{user_id}"))
-    return kb
-
-
-# === СТАРТ ===
+# ====== Handlers ======
 @dp.message_handler(commands=["start"])
-async def start_cmd(message: types.Message):
+async def start(message: types.Message):
     user_id = message.from_user.id
-    username = message.from_user.username or message.from_user.full_name
+    data = get_user_data(user_id)
+    # если первый раз — даём бонус
+    if data["sub_end"] is None:
+        data["sub_end"] = (datetime.now() + timedelta(days=FREE_DAYS)).timestamp()
+        save_user_data(user_id, data)
+    await message.answer(f"Привет, {message.from_user.full_name}! 👋\nЯ сохраню все ваши удалённые и исчезающие сообщения.", reply_markup=menu_main())
 
-    if user_id not in users:
-        users[user_id] = {
-            "trial_end": datetime.now() + timedelta(days=TRIAL_DAYS),
-            "sub_end": None,
-            "referred_by": None,
-            "referrals": [],
-            "active": True
-        }
-
-    text = (
-        f"👋 Привет, <b>{username}</b>!\n\n"
-        "✨ Я — <b>Chat Save Bot</b>.\n"
-        "Я умею сохранять 🗑️ удалённые и ⏳ одноразовые сообщения в чатах и диалогах!\n\n"
-        f"🔥 Твой бесплатный пробный период: <b>{TRIAL_DAYS} дней</b>.\n\n"
-        "Чтобы бот работал — нажми ниже 👇"
-    )
-    await message.answer(text, reply_markup=main_menu())
-
-
-# === АКТИВАЦИЯ ===
-@dp.callback_query_handler(lambda c: c.data == "activate")
-async def activate_bot(call: types.CallbackQuery):
-    text = (
-        "⚡ Чтобы бот работал в личных чатах:\n\n"
-        "1️⃣ Перейди в <b>Настройки</b>\n"
-        "2️⃣ Открой <b>Telegram для бизнеса</b>\n"
-        "3️⃣ Выбери <b>Чат-боты</b>\n"
-        "4️⃣ Добавь меня: <b>@Chat_ls_save_bot</b>\n\n"
-        "✅ Всё! Теперь я буду сохранять удалённые сообщения 🔥"
-    )
-    await call.message.edit_text(text)
-
-
-# === ПОКАЗАТЬ РЕКВИЗИТЫ ===
-@dp.callback_query_handler(lambda c: c.data == "pay_info")
-async def show_payment(call: types.CallbackQuery):
+@dp.callback_query_handler(lambda c: c.data)
+async def callbacks(call: types.CallbackQuery):
     user_id = call.from_user.id
-    text = (
-        "💳 Для продления подписки оплати по реквизитам:\n\n"
-        f"{PAY_DETAILS}\n\n"
-        "После оплаты нажми кнопку ⬇️"
-    )
-    await call.message.edit_text(text, reply_markup=paid_button(user_id))
+    data = get_user_data(user_id)
 
+    if call.data == "tariffs":
+        await call.message.edit_text("Вот наши тарифы:", reply_markup=menu_tariffs())
+    elif call.data.startswith("buy_"):
+        tariff = call.data[4:]
+        price = TARIFFS.get(tariff)
+        await call.message.answer(f"💳 Оплатите {price}₽ на реквизиты:\n{BANK_REQUISITES}\nПосле оплаты нажмите «Оплатил(а)»")
+    elif call.data == "paid":
+        # уведомляем админа
+        await bot.send_message(ADMIN_ID, f"Пользователь {call.from_user.full_name} ({user_id}) оплатил подписку.")
+        await call.message.answer("✅ Спасибо! После проверки подписка активирована.")
+    elif call.data == "referral":
+        ref_link = f"https://t.me/Chat_ls_save_bot?start={user_id}"
+        await call.message.answer(f"👥 Ваша реферальная ссылка:\n{ref_link}\nБонус +7 дней после активации новым пользователем.")
 
-# === КНОПКА "ОПЛАТИЛ(А)" ===
-@dp.callback_query_handler(lambda c: c.data.startswith("paid_"))
-async def paid_request(call: types.CallbackQuery):
-    user_id = int(call.data.split("_")[1])
-    username = call.from_user.username or call.from_user.full_name
+# ====== Business messages ======
+@dp.message_handler(content_types=types.ContentTypes.ANY)
+async def handle_business(message: types.Message):
+    # сохраняем все сообщения
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    msg_data = {
+        "message_id": message.message_id,
+        "date": str(message.date),
+        "type": message.content_type,
+        "text": getattr(message, "text", None)
+    }
+    add_message(user_id, chat_id, msg_data)
 
-    await bot.send_message(
-        ADMIN_GROUP_ID,
-        f"💸 Пользователь @{username} (ID: {user_id}) нажал 'Оплатил(а)'.\n"
-        f"Сумма: {SUB_PRICE}\n⏰ {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n"
-        f"Подтвердить оплату?",
-        reply_markup=InlineKeyboardMarkup().add(
-            InlineKeyboardButton("✅ Подтвердить", callback_data=f"confirm_{user_id}")
-        )
-    )
-    await call.message.edit_text("⏳ Ожидается подтверждение оплаты администратором...")
-
-
-# === АДМИН ПОДТВЕРЖДАЕТ ===
-@dp.callback_query_handler(lambda c: c.data.startswith("confirm_"))
-async def confirm_payment(call: types.CallbackQuery):
-    user_id = int(call.data.split("_")[1])
-    if user_id in users:
-        users[user_id]["sub_end"] = datetime.now() + timedelta(days=30)
-        users[user_id]["active"] = True
-
-    await bot.send_message(user_id, "🎉 Оплата подтверждена! Подписка активна ещё на 30 дней 🔥")
-    await call.message.edit_text(f"✅ Оплата подтверждена для ID {user_id}")
-
-
-# === НАПОМИНАЛКА ===
-async def check_subscriptions():
-    while True:
-        now = datetime.now()
-        for user_id, data in list(users.items()):
-            # пробный период
-            if data["trial_end"] and now > data["trial_end"] and not data["sub_end"]:
-                await bot.send_message(
-                    user_id,
-                    "⏳ Твой бесплатный период закончился!\nПродли подписку, чтобы продолжить пользоваться ботом 🔥",
-                    reply_markup=pay_menu()
-                )
-                users[user_id]["trial_end"] = None
-
-            # подписка подходит к концу
-            if data["sub_end"]:
-                days_left = (data["sub_end"] - now).days
-                if days_left in [3, 2, 1]:
-                    await bot.send_message(
-                        user_id,
-                        f"⚠️ Ваша подписка закончится через <b>{days_left} дн.</b>!\n"
-                        "Продли её заранее, чтобы не потерять доступ 🔥",
-                        reply_markup=pay_menu()
-                    )
-
-                if now > data["sub_end"]:
-                    users[user_id]["active"] = False
-                    await bot.send_message(
-                        user_id,
-                        "❌ Подписка закончилась!\nПродли её, чтобы я снова работал 🙌",
-                        reply_markup=pay_menu()
-                    )
-        await asyncio.sleep(3600)  # проверка раз в час
-
-
-# === СТАРТ ПОЛЛИНГА ===
 if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
-    loop.create_task(check_subscriptions())
+    from aiogram import executor
     executor.start_polling(dp, skip_updates=True)
