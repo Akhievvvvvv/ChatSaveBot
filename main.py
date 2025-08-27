@@ -1,136 +1,135 @@
-import json
-import os
 import asyncio
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.utils import executor
+import json
+import os
 from config import TOKEN, ADMIN_ID, TARIFFS, BANK_REQUISITES, FREE_DAYS, DATA_PATH
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
 
-# Папка для хранения сообщений
+# Проверка и создание папки для данных
 if not os.path.exists(DATA_PATH):
     os.makedirs(DATA_PATH)
 
-MESSAGES_FILE = os.path.join(DATA_PATH, "messages.json")
-USERS_FILE = os.path.join(DATA_PATH, "users.json")
+# Загружаем или создаём файл с пользователями
+users_file = os.path.join(DATA_PATH, "users.json")
+if os.path.exists(users_file):
+    with open(users_file, "r") as f:
+        users = json.load(f)
+else:
+    users = {}
 
-# Загрузка данных
-def load_json(path):
-    if os.path.exists(path):
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
-
-messages_data = load_json(MESSAGES_FILE)
-users_data = load_json(USERS_FILE)
-
-# Сохранение данных
-def save_json(path, data):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
-
-# Главное меню
+# --- Кнопки ---
 def main_menu():
-    kb = InlineKeyboardMarkup()
-    kb.add(InlineKeyboardButton("⚡ Активировать 7 дней бесплатно", callback_data="free_7days"))
-    kb.add(InlineKeyboardButton("👥 Рефералы", callback_data="referrals"))
-    kb.add(InlineKeyboardButton("💳 Тарифы", callback_data="tariffs"))
+    kb = InlineKeyboardMarkup(row_width=1)
+    kb.add(
+        InlineKeyboardButton("🎁 7 дней бесплатно", callback_data="free_week"),
+        InlineKeyboardButton("💰 Тарифы", callback_data="tariffs"),
+        InlineKeyboardButton("🤝 Рефералы", callback_data="referrals")
+    )
     return kb
 
-# Подменю тарифов
+def back_menu():
+    kb = InlineKeyboardMarkup(row_width=1)
+    kb.add(InlineKeyboardButton("🔙 Назад", callback_data="back"))
+    return kb
+
 def tariffs_menu():
-    kb = InlineKeyboardMarkup()
+    kb = InlineKeyboardMarkup(row_width=1)
     for name, price in TARIFFS.items():
-        kb.add(InlineKeyboardButton(f"{name} — {price}₽", callback_data=f"buy_{name}"))
-    kb.add(InlineKeyboardButton("🔙 Назад", callback_data="back_main"))
+        # Название тарифов на русском
+        if name == "2_weeks":
+            title = "2 недели"
+        elif name == "1_month":
+            title = "1 месяц"
+        elif name == "2_months":
+            title = "2 месяца"
+        else:
+            title = name
+        kb.add(InlineKeyboardButton(f"{title} — {price}₽", callback_data=f"tariff_{name}"))
+    kb.add(InlineKeyboardButton("🔙 Назад", callback_data="back"))
     return kb
 
-# Подменю рефералов
-def referrals_menu(user_id):
-    kb = InlineKeyboardMarkup()
-    kb.add(InlineKeyboardButton("🔙 Назад", callback_data="back_main"))
-    return kb
+# --- Старт ---
+@dp.message_handler(commands=["start"])
+async def start_command(message: types.Message):
+    user_id = str(message.from_user.id)
+    # Добавляем пользователя если новый
+    if user_id not in users:
+        users[user_id] = {"active": False, "paid": False, "referrals": []}
+        with open(users_file, "w") as f:
+            json.dump(users, f, indent=4)
 
-# Приветственное сообщение
-WELCOME_TEXT = (
-    "✨ Привет! Я бот ChatSaver 🤖\n\n"
-    "Я умею сохранять удалённые и одноразовые сообщения!\n\n"
-    f"💎 Бесплатный период: {FREE_DAYS} дней\n"
-    "📌 После окончания бесплатного периода бот будет работать только после оплаты.\n\n"
-    "Нажмите кнопку ниже, чтобы активировать бесплатный период!"
-)
+    text = (
+        f"✨ Привет, {message.from_user.full_name}!\n\n"
+        "Я бот ChatSaver 🤖 — сохраняю удалённые и одноразовые сообщения.\n\n"
+        f"💎 Бесплатный период: {FREE_DAYS} дней\n"
+        "📌 После окончания бесплатного периода бот будет работать только после оплаты.\n\n"
+        "Выберите действие ниже:"
+    )
+    await message.answer(text, reply_markup=main_menu())
 
-# Инструкция после активации
-INSTRUCTION_TEXT = (
-    "🎉 Поздравляем! Бот активирован на 7 дней бесплатно.\n\n"
-    "📌 Инструкция по подключению:\n"
-    "1️⃣ Перейдите в 'Настройки'\n"
-    "2️⃣ Откройте 'Telegram для бизнеса'\n"
-    "3️⃣ Нажмите 'Чат-боты'\n"
-    "4️⃣ Добавьте бота @Chat_ls_save_bot\n\n"
-    "Бот теперь будет сохранять удалённые сообщения в ваших чатах."
-)
-
-# Проверка оплаты
-def is_paid(user_id):
-    user = users_data.get(str(user_id), {})
-    return user.get("paid", False)
-
-# Событие нажатия кнопок
+# --- Callback ---
 @dp.callback_query_handler(lambda c: True)
 async def callbacks(call: types.CallbackQuery):
-    user_id = call.from_user.id
+    user_id = str(call.from_user.id)
+    data = call.data
 
-    if call.data == "free_7days":
-        users_data[str(user_id)] = {"paid": True, "free": True, "days_left": FREE_DAYS}
-        save_json(USERS_FILE, users_data)
-        await bot.send_message(user_id, INSTRUCTION_TEXT)
-        await call.answer()
-
-    elif call.data == "tariffs":
-        await bot.send_message(user_id, "Выберите тариф:", reply_markup=tariffs_menu())
-        await call.answer()
-
-    elif call.data.startswith("buy_"):
-        name = call.data.split("_")[1]
-        price = TARIFFS.get(name, 0)
-        text = f"💳 Вы выбрали тариф {name} — {price}₽\nРеквизиты для оплаты: {BANK_REQUISITES}\n\nПосле оплаты нажмите 'Оплатил(а)' в боте."
-        await bot.send_message(user_id, text)
-        await call.answer()
-
-    elif call.data == "referrals":
-        await bot.send_message(user_id, f"Ваша реферальная ссылка: https://t.me/Chat_ls_save_bot?start={user_id}")
-        await call.answer()
-
-    elif call.data == "back_main":
-        await bot.send_message(user_id, WELCOME_TEXT, reply_markup=main_menu())
-        await call.answer()
-
-# Сохранение сообщений
-@dp.message_handler(content_types=types.ContentTypes.ANY)
-async def handle_messages(message: types.Message):
-    user_id = message.from_user.id
-    if not is_paid(user_id):
+    if data == "back":
+        await call.message.edit_text(
+            f"✨ Главное меню, {call.from_user.full_name}:", reply_markup=main_menu()
+        )
         return
-    msg_id = str(message.message_id)
-    messages_data[msg_id] = {
-        "user": user_id,
-        "chat": message.chat.id,
-        "text": message.text,
-        "type": message.content_type
-    }
-    save_json(MESSAGES_FILE, messages_data)
 
-# Запуск бота
-async def main():
-    for user_id, data in users_data.items():
-        if data.get("free", False):
-            # Можно уменьшать days_left каждый день через scheduler
-            pass
-    await bot.send_message(ADMIN_ID, "Бот запущен!")
-    await dp.start_polling()
+    if data == "free_week":
+        users[user_id]["active"] = True
+        users[user_id]["free"] = True
+        with open(users_file, "w") as f:
+            json.dump(users, f, indent=4)
 
+        await call.message.edit_text(
+            "🎉 Бесплатный период активирован!\n\n"
+            "📌 Инструкция по подключению бота:\n"
+            "1. Добавьте меня в Telegram Business\n"
+            "2. Разрешите доступ к вашим чатам\n"
+            "3. Все удалённые сообщения теперь будут сохраняться!\n\n"
+            "📝 Используйте главное меню для управления ботом.",
+            reply_markup=back_menu()
+        )
+        return
+
+    if data.startswith("tariff_"):
+        name = data.split("_")[1]
+        price = TARIFFS[name]
+        await call.message.edit_text(
+            f"💳 Тариф: {name.replace('_', ' ')}\n"
+            f"Стоимость: {price}₽\n"
+            f"Реквизиты для оплаты: {BANK_REQUISITES}\n\n"
+            "После оплаты сообщите в группу для подтверждения.",
+            reply_markup=back_menu()
+        )
+        return
+
+    if data == "tariffs":
+        await call.message.edit_text(
+            "Выберите тариф:", reply_markup=tariffs_menu()
+        )
+        return
+
+    if data == "referrals":
+        ref_link = f"https://t.me/Chat_ls_save_bot?start={user_id}"
+        count = len(users[user_id].get("referrals", []))
+        await call.message.edit_text(
+            f"🤝 Ваша реферальная ссылка:\n{ref_link}\n"
+            f"Количество рефералов: {count}\n"
+            "Бонусы начисляются после оплаты рефералов.",
+            reply_markup=back_menu()
+        )
+        return
+
+# --- Запуск ---
 if __name__ == "__main__":
-    asyncio.run(main())
+    print("Бот запущен...")
+    executor.start_polling(dp, skip_updates=True)
