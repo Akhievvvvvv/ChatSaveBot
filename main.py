@@ -1,7 +1,7 @@
 import asyncio, json, random
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from config import TOKEN, ADMIN_ID, TARIFFS, REKVIZITY
+from config import TOKEN, ADMIN_ID, TARIFFS, BANK_REQUISITES
 from utils import load_users, save_users, save_message
 
 bot = Bot(token=TOKEN)
