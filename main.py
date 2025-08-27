@@ -1,112 +1,138 @@
-import asyncio
+import asyncio, json, random
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from datetime import datetime, timedelta
-import json, os
-
-from config import TOKEN, ADMIN_ID, TARIFFS, BANK_REQUISITES, FREE_DAYS
-from utils import load_users, save_users, add_message
+from config import TOKEN, ADMIN_ID, TARIFFS, REKVIZITY
+from utils import load_users, save_users, save_message
 
 bot = Bot(token=TOKEN)
-dp = Dispatcher(bot)
+dp = Dispatcher()
 
 users = load_users()
 
-# ====== Helpers ======
-def get_user_data(user_id):
-    return users.get(str(user_id), {"sub_end": None, "referrals": [], "bonus_active": False})
+# -------------------- Вспомогательные функции --------------------
 
-def save_user_data(user_id, data):
-    users[str(user_id)] = data
+def get_referral_link(user_id):
+    return f"https://t.me/Chat_ls_save_bot?start=ref{user_id}"
+
+def user_active(user_id):
+    return users.get(str(user_id), {}).get("active", False)
+
+def add_referral(user_id, ref_id):
+    user_data = users.get(str(user_id), {})
+    if "referrals" not in user_data:
+        user_data["referrals"] = []
+    if ref_id not in user_data["referrals"]:
+        user_data["referrals"].append(ref_id)
+    users[str(user_id)] = user_data
     save_users(users)
 
-# ====== Inline menus ======
-def menu_main():
-    kb = InlineKeyboardMarkup(row_width=1)
-    kb.add(
-        InlineKeyboardButton("📜 Посмотреть тарифы", callback_data="tariffs"),
-        InlineKeyboardButton("👥 Моя реферальная ссылка", callback_data="referral")
-    )
-    return kb
+# -------------------- Хэндлеры --------------------
 
-def menu_tariffs():
-    kb = InlineKeyboardMarkup(row_width=1)
-    russian_names = {
-        "2_weeks": "2 недели",
-        "1_month": "1 месяц",
-        "2_months": "2 месяца"
-    }
-    for name, price in TARIFFS.items():
-        kb.add(InlineKeyboardButton(f"{russian_names.get(name, name)} — {price}₽", callback_data=f"buy_{name}"))
-    return kb
-
-def menu_paid():
-    kb = InlineKeyboardMarkup(row_width=1)
-    kb.add(InlineKeyboardButton("✅ Оплатил(а)", callback_data="paid"))
-    return kb
-
-# ====== Handlers ======
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
     user_id = message.from_user.id
-    data = get_user_data(user_id)
-    # если первый раз — даём бонус
-    if data["sub_end"] is None:
-        data["sub_end"] = (datetime.now() + timedelta(days=FREE_DAYS)).timestamp()
-        save_user_data(user_id, data)
-    text = (
-        f"🌟 Привет, {message.from_user.full_name}! 👋\n\n"
-        "Я — ваш личный помощник для сохранения сообщений в Telegram Business.\n\n"
-        "✨ Что я умею:\n"
-        "• Сохраняю удалённые сообщения\n"
-        "• Сохраняю исчезающие сообщения (фото, видео, гс)\n"
-        "• Подписка с бонусными днями и рефералами\n\n"
-        "Для начала выберите опцию в меню ниже ⬇️"
-    )
-    await message.answer(text, reply_markup=menu_main())
+    users.setdefault(str(user_id), {"active": False, "referrals": []})
+    
+    # Проверка на рефералку
+    if message.get_args().startswith("ref"):
+        ref_id = message.get_args()[3:]
+        if ref_id != str(user_id):
+            add_referral(ref_id, user_id)
+    
+    if not user_active(user_id):
+        kb = InlineKeyboardMarkup().add(InlineKeyboardButton("Выбрать тариф 💳", callback_data="tariffs"))
+        await message.answer(
+            "Привет! 👋\n\n"
+            "Бот ChatSave — сохраняет удалённые и исчезающие сообщения, 🔒 защищает вашу переписку.\n\n"
+            "Чтобы активировать бота, выберите тариф ниже:",
+            reply_markup=kb
+        )
+    else:
+        await send_welcome(user_id)
 
-@dp.callback_query_handler(lambda c: c.data)
+async def send_welcome(user_id):
+    kb = InlineKeyboardMarkup()
+    kb.add(InlineKeyboardButton("Моя реферальная ссылка 🔗", callback_data="myref"))
+    kb.add(InlineKeyboardButton("Мои сообщения 💾", callback_data="mymessages"))
+    await bot.send_message(user_id,
+        "🎉 Поздравляем! Ваша подписка активирована.\n\n"
+        "Что умеет бот:\n"
+        "• Сохраняет удалённые сообщения\n"
+        "• Сохраняет исчезающие фото, видео и голосовые\n"
+        "• Показывает историю переписки в удобном формате\n\n"
+        "Используйте кнопки ниже для управления:", reply_markup=kb)
+
+# -------------------- Callback Query --------------------
+
+@dp.callback_query_handler(lambda c: True)
 async def callbacks(call: types.CallbackQuery):
     user_id = call.from_user.id
-    data = get_user_data(user_id)
+    data = call.data
 
-    if call.data == "tariffs":
-        await call.message.edit_text("💰 Выберите тариф:", reply_markup=menu_tariffs())
-    elif call.data.startswith("buy_"):
-        tariff = call.data[4:]
-        price = TARIFFS.get(tariff)
-        # Красочный текст реквизитов
-        text = (
-            f"💳 Вы выбрали тариф: **{tariff.replace('_', ' ')}**\n\n"
-            f"💰 Сумма к оплате: **{price}₽**\n"
-            f"🏦 Реквизиты для оплаты:\n"
-            f"🔹 Номер карты: **89322229930**\n"
-            f"🔹 Банк: **Ozon Bank**\n\n"
-            "После оплаты нажмите кнопку ниже, чтобы подтвердить оплату."
+    if data == "tariffs":
+        kb = InlineKeyboardMarkup()
+        for name, price in TARIFFS.items():
+            kb.add(InlineKeyboardButton(f"{name} — {price}₽", callback_data=f"pay_{name}"))
+        await call.message.edit_text("Выберите тариф для оплаты:", reply_markup=kb)
+
+    elif data.startswith("pay_"):
+        plan = data[4:]
+        await bot.send_message(ADMIN_ID,
+            f"Пользователь {call.from_user.full_name} ({user_id}) хочет оплатить тариф {plan}.\n"
+            f"Реквизиты для оплаты: {REKVIZITY}",
+            reply_markup=InlineKeyboardMarkup().add(
+                InlineKeyboardButton("✅ Подтвердить оплату", callback_data=f"confirm_{user_id}")
+            )
         )
-        await call.message.edit_text(text, reply_markup=menu_paid())
-    elif call.data == "paid":
-        # уведомляем админа
-        await bot.send_message(ADMIN_ID, f"Пользователь {call.from_user.full_name} ({user_id}) оплатил подписку.")
-        await call.message.answer("✅ Спасибо! После проверки подписка активирована.")
-    elif call.data == "referral":
-        ref_link = f"https://t.me/Chat_ls_save_bot?start={user_id}"
-        await call.message.answer(f"👥 Ваша реферальная ссылка:\n{ref_link}\nБонус +7 дней после активации новым пользователем.")
+        await call.message.answer("Запрос на оплату отправлен админу. Ожидайте подтверждения ✅")
 
-# ====== Business messages ======
-@dp.message_handler(content_types=types.ContentTypes.ANY)
-async def handle_business(message: types.Message):
-    # сохраняем все сообщения
+    elif data.startswith("confirm_") and user_id == ADMIN_ID:
+        uid = int(data.split("_")[1])
+        users.setdefault(str(uid), {})["active"] = True
+        save_users(users)
+        await bot.send_message(uid, "Оплата подтверждена! 🎉")
+        await send_welcome(uid)
+        await call.answer("Подписка подтверждена ✅")
+
+    elif data == "myref":
+        user_data = users.get(str(user_id), {})
+        referrals = user_data.get("referrals", [])
+        text = f"Ваша реферальная ссылка: {get_referral_link(user_id)}\n\n"
+        text += f"Всего перешло по ссылке: {len(referrals)}\n"
+        text += "Активировавшие подписку:\n"
+        active_refs = [r for r in referrals if users.get(str(r), {}).get("active")]
+        for r in active_refs:
+            text += f"• {r}\n"
+        await call.message.answer(text)
+
+    elif data == "mymessages":
+        path = f"data/{user_id}_messages.json"
+        if not os.path.exists(path):
+            await call.message.answer("У вас пока нет сохранённых сообщений.")
+            return
+        with open(path, "r", encoding="utf-8") as f:
+            msgs = json.load(f)
+        for m in msgs[-10:]:
+            await call.message.answer(str(m))  # Показываем последние 10 сообщений
+
+# -------------------- Сохраняем сообщения --------------------
+
+@dp.message_handler(content_types=types.ContentType.ANY)
+async def save_all(message: types.Message):
     user_id = message.from_user.id
-    chat_id = message.chat.id
-    msg_data = {
-        "message_id": message.message_id,
-        "date": str(message.date),
-        "type": message.content_type,
-        "text": getattr(message, "text", None)
-    }
-    add_message(user_id, chat_id, msg_data)
+    if user_active(user_id):
+        msg = {
+            "type": message.content_type,
+            "text": message.text or "",
+            "date": str(message.date)
+        }
+        save_message(user_id, msg)
+
+# -------------------- Запуск бота --------------------
+
+async def main():
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    from aiogram import executor
-    executor.start_polling(dp, skip_updates=True)
+    import asyncio
+    asyncio.run(main())
