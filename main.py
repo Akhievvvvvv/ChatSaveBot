@@ -5,7 +5,7 @@ from config import TOKEN, ADMIN_ID, TARIFFS, BANK_REQUISITES
 from utils import load_users, save_users, save_message
 
 bot = Bot(token=TOKEN)
-dp = Dispatcher()
+dp = Dispatcher(bot)
 
 users = load_users()
 
