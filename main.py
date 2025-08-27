@@ -1,135 +1,136 @@
-import json, os, asyncio
-from datetime import datetime, timedelta
+import json
+import os
+import asyncio
 from aiogram import Bot, Dispatcher, types
-from aiogram.utils import executor
-from config import TOKEN, ADMIN_ID, TARIFFS, BANK_REQUISITES, FREE_DAYS
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+from config import TOKEN, ADMIN_ID, TARIFFS, BANK_REQUISITES, FREE_DAYS, DATA_PATH
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
 
-DATA_PATH = "data"
-USERS_FILE = os.path.join(DATA_PATH, "users.json")
+# Папка для хранения сообщений
+if not os.path.exists(DATA_PATH):
+    os.makedirs(DATA_PATH)
+
 MESSAGES_FILE = os.path.join(DATA_PATH, "messages.json")
-REFERRALS_FILE = os.path.join(DATA_PATH, "referrals.json")
+USERS_FILE = os.path.join(DATA_PATH, "users.json")
 
-# ============ UTILS ============
-def load_json(file):
-    if not os.path.exists(file):
-        return {}
-    with open(file, "r", encoding="utf-8") as f:
-        return json.load(f)
+# Загрузка данных
+def load_json(path):
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
 
-def save_json(file, data):
-    with open(file, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+messages_data = load_json(MESSAGES_FILE)
+users_data = load_json(USERS_FILE)
 
-def save_message(user_id, message):
-    data = load_json(MESSAGES_FILE)
-    if str(user_id) not in data:
-        data[str(user_id)] = []
-    data[str(user_id)].append({
-        "text": message.text,
-        "from": message.from_user.full_name,
-        "date": str(message.date)
-    })
-    save_json(MESSAGES_FILE, data)
+# Сохранение данных
+def save_json(path, data):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
 
-def activate_free_period(user_id):
-    users = load_json(USERS_FILE)
-    users[str(user_id)] = {
-        "free_until": str(datetime.now() + timedelta(days=FREE_DAYS)),
-        "paid": False
-    }
-    save_json(USERS_FILE, users)
-
-def check_access(user_id):
-    users = load_json(USERS_FILE)
-    u = users.get(str(user_id))
-    if not u:
-        return False
-    if u.get("paid"):
-        return True
-    free_until = datetime.fromisoformat(u.get("free_until"))
-    return datetime.now() <= free_until
-
-# ============ KEYBOARDS ============
+# Главное меню
 def main_menu():
-    kb = types.InlineKeyboardMarkup(row_width=1)
-    kb.add(
-        types.InlineKeyboardButton("🚀 Активировать 7 дней бесплатно", callback_data="free_week"),
-        types.InlineKeyboardButton("💰 Тарифы", callback_data="tariffs"),
-        types.InlineKeyboardButton("🎁 Рефералы", callback_data="referrals")
-    )
+    kb = InlineKeyboardMarkup()
+    kb.add(InlineKeyboardButton("⚡ Активировать 7 дней бесплатно", callback_data="free_7days"))
+    kb.add(InlineKeyboardButton("👥 Рефералы", callback_data="referrals"))
+    kb.add(InlineKeyboardButton("💳 Тарифы", callback_data="tariffs"))
     return kb
 
+# Подменю тарифов
 def tariffs_menu():
-    kb = types.InlineKeyboardMarkup(row_width=1)
-    kb.add(
-        types.InlineKeyboardButton("2 недели — 49₽", callback_data="tariff_2weeks"),
-        types.InlineKeyboardButton("1 месяц — 89₽", callback_data="tariff_1month"),
-        types.InlineKeyboardButton("2 месяца — 149₽", callback_data="tariff_2months"),
-        types.InlineKeyboardButton("⬅ Назад", callback_data="back_main")
-    )
+    kb = InlineKeyboardMarkup()
+    for name, price in TARIFFS.items():
+        kb.add(InlineKeyboardButton(f"{name} — {price}₽", callback_data=f"buy_{name}"))
+    kb.add(InlineKeyboardButton("🔙 Назад", callback_data="back_main"))
     return kb
 
+# Подменю рефералов
 def referrals_menu(user_id):
-    kb = types.InlineKeyboardMarkup(row_width=1)
-    kb.add(
-        types.InlineKeyboardButton("⬅ Назад", callback_data="back_main")
-    )
+    kb = InlineKeyboardMarkup()
+    kb.add(InlineKeyboardButton("🔙 Назад", callback_data="back_main"))
     return kb
 
+# Приветственное сообщение
 WELCOME_TEXT = (
-    "🌟 Добро пожаловать в ChatSaveBot!\n\n"
-    "С этим ботом вы сможете:\n"
-    "✅ Сохранять удалённые сообщения\n"
-    "✅ Сохранять одноразовые сообщения\n"
-    "✅ Получать уведомления о новых сообщениях\n\n"
-    "Начните с бесплатного пробного периода — 7 дней полностью бесплатно!"
+    "✨ Привет! Я бот ChatSaver 🤖\n\n"
+    "Я умею сохранять удалённые и одноразовые сообщения!\n\n"
+    f"💎 Бесплатный период: {FREE_DAYS} дней\n"
+    "📌 После окончания бесплатного периода бот будет работать только после оплаты.\n\n"
+    "Нажмите кнопку ниже, чтобы активировать бесплатный период!"
 )
 
-FREE_TEXT = (
-    "🎉 Ваш бесплатный период активирован!\n\n"
-    "Вот как подключить бота к Telegram Business и начать сохранять сообщения:\n"
-    "1️⃣ Перейдите в 'Настройки' → 'Telegram для бизнеса'\n"
-    "2️⃣ Нажмите 'Чат-боты' и добавьте ChatSaveBot\n"
-    "3️⃣ Всё готово, бот теперь сохраняет ваши сообщения!"
+# Инструкция после активации
+INSTRUCTION_TEXT = (
+    "🎉 Поздравляем! Бот активирован на 7 дней бесплатно.\n\n"
+    "📌 Инструкция по подключению:\n"
+    "1️⃣ Перейдите в 'Настройки'\n"
+    "2️⃣ Откройте 'Telegram для бизнеса'\n"
+    "3️⃣ Нажмите 'Чат-боты'\n"
+    "4️⃣ Добавьте бота @Chat_ls_save_bot\n\n"
+    "Бот теперь будет сохранять удалённые сообщения в ваших чатах."
 )
 
-# ============ HANDLERS ============
-@dp.message_handler(commands=["start"])
-async def start(message: types.Message):
-    await message.answer(WELCOME_TEXT, reply_markup=main_menu())
+# Проверка оплаты
+def is_paid(user_id):
+    user = users_data.get(str(user_id), {})
+    return user.get("paid", False)
 
+# Событие нажатия кнопок
 @dp.callback_query_handler(lambda c: True)
 async def callbacks(call: types.CallbackQuery):
     user_id = call.from_user.id
-    if call.data == "free_week":
-        activate_free_period(user_id)
-        await bot.send_message(user_id, FREE_TEXT)
+
+    if call.data == "free_7days":
+        users_data[str(user_id)] = {"paid": True, "free": True, "days_left": FREE_DAYS}
+        save_json(USERS_FILE, users_data)
+        await bot.send_message(user_id, INSTRUCTION_TEXT)
         await call.answer()
+
     elif call.data == "tariffs":
         await bot.send_message(user_id, "Выберите тариф:", reply_markup=tariffs_menu())
         await call.answer()
-    elif call.data == "referrals":
-        await bot.send_message(user_id, "Ваша реферальная ссылка:\n"
-                                         f"https://t.me/Chat_ls_save_bot?start={user_id}",
-                               reply_markup=referrals_menu(user_id))
+
+    elif call.data.startswith("buy_"):
+        name = call.data.split("_")[1]
+        price = TARIFFS.get(name, 0)
+        text = f"💳 Вы выбрали тариф {name} — {price}₽\nРеквизиты для оплаты: {BANK_REQUISITES}\n\nПосле оплаты нажмите 'Оплатил(а)' в боте."
+        await bot.send_message(user_id, text)
         await call.answer()
+
+    elif call.data == "referrals":
+        await bot.send_message(user_id, f"Ваша реферальная ссылка: https://t.me/Chat_ls_save_bot?start={user_id}")
+        await call.answer()
+
     elif call.data == "back_main":
         await bot.send_message(user_id, WELCOME_TEXT, reply_markup=main_menu())
         await call.answer()
 
-# ============ BUSINESS MESSAGE HANDLER ============
+# Сохранение сообщений
 @dp.message_handler(content_types=types.ContentTypes.ANY)
-async def save_all_messages(message: types.Message):
-    if check_access(message.from_user.id):
-        save_message(message.from_user.id, message)
-    else:
-        await message.answer("⚠ Ваш пробный период закончился. Пожалуйста, выберите тариф для продолжения.")
+async def handle_messages(message: types.Message):
+    user_id = message.from_user.id
+    if not is_paid(user_id):
+        return
+    msg_id = str(message.message_id)
+    messages_data[msg_id] = {
+        "user": user_id,
+        "chat": message.chat.id,
+        "text": message.text,
+        "type": message.content_type
+    }
+    save_json(MESSAGES_FILE, messages_data)
 
-# ============ START BOT ============
+# Запуск бота
+async def main():
+    for user_id, data in users_data.items():
+        if data.get("free", False):
+            # Можно уменьшать days_left каждый день через scheduler
+            pass
+    await bot.send_message(ADMIN_ID, "Бот запущен!")
+    await dp.start_polling()
+
 if __name__ == "__main__":
-    if not os.path.exists(DATA_PATH):
-        os.makedirs(DATA_PATH)
-    executor.start_polling(dp, skip_updates=True)
+    asyncio.run(main())
