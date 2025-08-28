@@ -40,6 +40,7 @@ def save_deleted_chat(chat_id, chat_title):
     with open(path, "a", encoding="utf-8") as f:
         f.write(f"[{datetime.now()}] {chat_title} ({chat_id}) был удалён\n")
 
+# Главное меню
 def main_menu():
     kb = InlineKeyboardMarkup(row_width=1)
     kb.add(
@@ -50,24 +51,22 @@ def main_menu():
     )
     return kb
 
+# Меню тарифов
 def tariffs_menu():
     kb = InlineKeyboardMarkup(row_width=1)
-    kb.add(
-        InlineKeyboardButton("14 дней — 49₽", callback_data="tariff_14"),
-        InlineKeyboardButton("30 дней — 99₽", callback_data="tariff_30"),
-        InlineKeyboardButton("60 дней — 149₽", callback_data="tariff_60"),
-        InlineKeyboardButton("◀️ Назад", callback_data="back_main")
-    )
-    return kb
-
-def referrals_menu(user_id):
-    kb = InlineKeyboardMarkup(row_width=1)
-    kb.add(
-        InlineKeyboardButton(f"🔗 Ваша личная ссылка", url=f"https://t.me/Chat_ls_save_bot?start={user_id}")
-    )
+    for name, price in TARIFFS.items():
+        kb.add(InlineKeyboardButton(f"{name} дней — {price}₽", callback_data=f"tariff_{name}"))
     kb.add(InlineKeyboardButton("◀️ Назад", callback_data="back_main"))
     return kb
 
+# Реферальное меню
+def referrals_menu(user_id):
+    kb = InlineKeyboardMarkup(row_width=1)
+    kb.add(InlineKeyboardButton(f"🔗 Ваша личная ссылка", url=f"https://t.me/Chat_ls_save_bot?start={user_id}"))
+    kb.add(InlineKeyboardButton("◀️ Назад", callback_data="back_main"))
+    return kb
+
+# Статистика
 def format_stats(user_id):
     user = users.get(str(user_id), {})
     end_date = datetime.fromisoformat(user.get("end_date", datetime.now().isoformat()))
@@ -97,6 +96,7 @@ async def start(message: types.Message):
     )
     await message.answer(text, reply_markup=main_menu(), parse_mode="Markdown")
 
+# Обработка кнопок
 @dp.callback_query_handler(lambda c: True)
 async def callbacks(call: types.CallbackQuery):
     data = call.data
@@ -111,7 +111,7 @@ async def callbacks(call: types.CallbackQuery):
             "✅ *Ваш бесплатный период активирован!* 🎉\n\n"
             "📌 *Инструкция по подключению:*\n"
             "1️⃣ Включите бизнес-режим\n"
-            "2️⃣ Добавьте бота в 'Чат-боты' в Telegram Business\n"
+            "2️⃣ Добавьте бота в 'Чат-боты'\n"
             "3️⃣ Бот начнёт сохранять все удалённые сообщения и медиа",
             parse_mode="Markdown"
         )
@@ -122,8 +122,8 @@ async def callbacks(call: types.CallbackQuery):
 
     elif data.startswith("tariff_"):
         t_name = data.replace("tariff_", "")
-        price_map = {"14": 49, "30": 99, "60": 149}
-        price = price_map[t_name]
+        price_map = {str(k): v for k, v in TARIFFS.items()}
+        price = price_map.get(t_name, "?")
         text = (
             f"💳 Вы выбрали тариф *{t_name} дней* за *{price}₽*\n\n"
             f"🏦 *Реквизиты для оплаты:*\n{BANK_REQUISITES}\n\n"
@@ -193,8 +193,9 @@ async def deleted_messages(event):
 
         save_deleted_message(chat.id, user_id, user_name, text)
         # Отправка пользователю
-        if str(user_id) in users and users[str(user_id)]["active"]:
-            await bot.send_message(user_id, f"📝 Удалено сообщение в {chat.title}:\n{text}")
+        for u_id, u_data in users.items():
+            if u_data.get("active"):
+                await bot.send_message(int(u_id), f"📝 Удалено сообщение в {chat.title}:\n{text}")
 
 # Отслеживание удалённых чатов
 @client.on(events.ChatAction)
@@ -206,11 +207,39 @@ async def deleted_chats(event):
             if u_data.get("active"):
                 await bot.send_message(int(u_id), f"❌ Удалён чат: {getattr(chat, 'title', 'Чат')} ({chat.id})")
 
+# Напоминания о подписке за 3, 2, 1 день
+async def send_subscription_reminders():
+    while True:
+        now = datetime.now()
+        for user_id, u_data in users.items():
+            if not u_data.get("active"):
+                continue
+            end_date = datetime.fromisoformat(u_data["end_date"])
+            days_left = (end_date - now).days
+            if days_left in [3, 2, 1]:
+                try:
+                    await bot.send_message(
+                        int(user_id),
+                        f"⏳ *Напоминание о подписке*\n\n"
+                        f"Ваш бесплатный период/тариф заканчивается через *{days_left} день(дня/дней)*!\n"
+                        "Не забудьте продлить или активировать новый тариф, чтобы бот продолжал сохранять все удалённые сообщения и медиа! 📩",
+                        parse_mode="Markdown"
+                    )
+                except Exception as e:
+                    print(f"Не удалось отправить напоминание пользователю {user_id}: {e}")
+        await asyncio.sleep(24 * 60 * 60)
+
+# Запуск aiogram
 async def start_aiogram():
     await dp.start_polling()
 
+# Основной запуск
 async def main():
-    await asyncio.gather(client.start(), start_aiogram())
+    await asyncio.gather(
+        client.start(),
+        start_aiogram(),
+        send_subscription_reminders()
+    )
 
 if __name__ == "__main__":
     asyncio.run(main())
