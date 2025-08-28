@@ -51,7 +51,9 @@ def tariffs_menu():
 # Реферальное меню
 def referrals_menu(user_id):
     kb = InlineKeyboardMarkup(row_width=1)
-    kb.add(InlineKeyboardButton(f"Ваша ссылка: https://t.me/Chat_ls_save_bot?start={user_id}", callback_data="ignore"))
+    kb.add(
+        InlineKeyboardButton(f"🔗 Ваша личная ссылка", url=f"https://t.me/Chat_ls_save_bot?start={user_id}")
+    )
     kb.add(InlineKeyboardButton("◀️ Назад", callback_data="back_main"))
     return kb
 
@@ -59,15 +61,15 @@ def referrals_menu(user_id):
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
     text = (
-        "✨ Добро пожаловать в ChatSaveBot!\n\n"
+        "✨ *Добро пожаловать в ChatSaveBot!*\n\n"
         "Этот бот сохраняет:\n"
-        "• Удалённые сообщения\n"
-        "• Однократные фото/видео/голосовые\n"
-        "• Удалённые чаты\n\n"
-        f"🎁 Бесплатный период: {FREE_DAYS} дней\n\n"
+        "• 📝 Удалённые сообщения\n"
+        "• 📸 Однократные фото/видео/голосовые\n"
+        "• ❌ Удалённые чаты\n\n"
+        f"🎁 *Бесплатный период:* {FREE_DAYS} дней\n\n"
         "Выберите действие ниже:"
     )
-    await message.answer(text, reply_markup=main_menu())
+    await message.answer(text, reply_markup=main_menu(), parse_mode="Markdown")
 
 # Обработка кнопок
 @dp.callback_query_handler(lambda c: True)
@@ -77,36 +79,44 @@ async def callbacks(call: types.CallbackQuery):
 
     if data == "activate_free":
         await call.message.answer(
-            "✅ Бесплатный период активирован!\n\n"
-            "Подробная инструкция:\n"
-            "1. Включите бизнес-режим\n"
-            "2. Добавьте бота в 'Чат-боты' в Telegram Business\n"
-            "3. Бот начнёт сохранять все удалённые сообщения"
+            "✅ *Ваш бесплатный период активирован!* 🎉\n\n"
+            "📌 *Инструкция по подключению:*\n"
+            "1️⃣ Включите бизнес-режим\n"
+            "2️⃣ Добавьте бота в 'Чат-боты' в Telegram Business\n"
+            "3️⃣ Бот начнёт сохранять все удалённые сообщения и медиа",
+            parse_mode="Markdown"
         )
 
     elif data == "tariffs":
-        await call.message.answer("Выберите тариф:", reply_markup=tariffs_menu())
+        await call.message.answer("💳 *Выберите тариф:*",
+                                  reply_markup=tariffs_menu(), parse_mode="Markdown")
 
     elif data.startswith("tariff_"):
         tariff_name = data.replace("tariff_", "")
         price_map = {"14": 49, "30": 99, "60": 149}
         price = price_map[tariff_name]
-        text = f"Вы выбрали тариф {tariff_name} дней за {price}₽\n\nРеквизиты для оплаты:\n{BANK_REQUISITES}\n\nПосле оплаты нажмите кнопку 'Оплатил(а)'"
+        text = (
+            f"💳 Вы выбрали тариф *{tariff_name} дней* за *{price}₽*\n\n"
+            f"🏦 *Реквизиты для оплаты:*\n{BANK_REQUISITES}\n\n"
+            "После оплаты нажмите кнопку 'Оплатил(а)'"
+        )
         kb = InlineKeyboardMarkup()
-        kb.add(InlineKeyboardButton("Оплатил(а)", callback_data=f"paid_{tariff_name}"))
+        kb.add(InlineKeyboardButton("✅ Оплатил(а)", callback_data=f"paid_{tariff_name}"))
         kb.add(InlineKeyboardButton("◀️ Назад", callback_data="tariffs"))
-        await call.message.answer(text, reply_markup=kb)
+        await call.message.answer(text, reply_markup=kb, parse_mode="Markdown")
 
     elif data.startswith("paid_"):
         tariff_name = data.replace("paid_", "")
         await bot.send_message(
             ADMIN_ID,
-            f"Пользователь {user.full_name} ({user.id}) выбрал тариф {tariff_name}\nНажмите ✅ Подтвердить оплату",
+            f"👤 Пользователь *{user.full_name}* ({user.id}) выбрал тариф {tariff_name}\n"
+            "Нажмите ✅ Подтвердить оплату",
+            parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup().add(
                 InlineKeyboardButton("✅ Подтвердить оплату", callback_data=f"confirm_{user.id}_{tariff_name}")
             )
         )
-        await call.message.answer("Ваша заявка отправлена на подтверждение администратору.")
+        await call.message.answer("⏳ Ваша заявка отправлена на подтверждение администратору.", parse_mode="Markdown")
 
     elif data.startswith("confirm_"):
         parts = data.split("_")
@@ -114,19 +124,21 @@ async def callbacks(call: types.CallbackQuery):
         tariff_name = parts[2]
         await bot.send_message(
             user_id,
-            f"🎉 Оплата подтверждена!\nВы подключили тариф: {tariff_name} дней\n\n"
-            "Инструкция по подключению:\n"
-            "1. Включите бизнес-режим\n"
-            "2. Добавьте бота в 'Чат-боты'\n"
-            "3. Бот начнёт сохранять удалённые сообщения и однократные медиа"
+            f"🎉 *Оплата подтверждена!*\nВы подключили тариф: *{tariff_name} дней*\n\n"
+            "📌 *Инструкция по подключению:*\n"
+            "1️⃣ Включите бизнес-режим\n"
+            "2️⃣ Добавьте бота в 'Чат-боты'\n"
+            "3️⃣ Бот начнёт сохранять удалённые сообщения и однократные медиа",
+            parse_mode="Markdown"
         )
-        await call.message.answer(f"Оплата пользователя {user_id} подтверждена ✅")
+        await call.message.answer(f"✅ Оплата пользователя {user_id} подтверждена", parse_mode="Markdown")
 
     elif data == "referrals":
-        await call.message.answer("Ваша реферальная ссылка и статистика:", reply_markup=referrals_menu(user.id))
+        await call.message.answer("🔗 *Ваша реферальная ссылка и статистика:*",
+                                  reply_markup=referrals_menu(user.id), parse_mode="Markdown")
 
     elif data == "back_main":
-        await call.message.answer("Главное меню:", reply_markup=main_menu())
+        await call.message.answer("🏠 Главное меню:", reply_markup=main_menu())
 
     await call.answer()
 
@@ -134,11 +146,20 @@ async def callbacks(call: types.CallbackQuery):
 @client.on(events.MessageDeleted)
 async def deleted_messages(event):
     chat = await event.get_chat()
-    for msg in event.deleted:
-        sender = await msg.get_sender()
-        text = msg.message or "<медиа/голосовое>"
-        save_deleted_message(chat.id, sender.id, sender.first_name, text)
-        await bot.send_message(ADMIN_ID, f"Удалено сообщение в {chat.title}:\n{text}")
+    for msg_id in event.message_ids:  # получаем ID удалённых сообщений
+        try:
+            msg = await client.get_messages(chat, ids=msg_id)
+            text = msg.text if msg else "<медиа/голосовое или удалённое>"
+            sender = await msg.get_sender() if msg else None
+            user_name = sender.first_name if sender else "Неизвестный"
+            user_id = sender.id if sender else 0
+        except:
+            text = "<удалённое сообщение>"
+            user_name = "Неизвестный"
+            user_id = 0
+
+        save_deleted_message(chat.id, user_id, user_name, text)
+        await bot.send_message(ADMIN_ID, f"📝 Удалено сообщение в {chat.title}:\n{text}")
 
 # Telethon: отслеживание удалённых чатов
 @client.on(events.ChatAction)
@@ -146,11 +167,13 @@ async def deleted_chats(event):
     if event.user_left or event.user_kicked:
         chat = await event.get_chat()
         save_deleted_chat(chat.id, getattr(chat, "title", "Чат"))
-        await bot.send_message(ADMIN_ID, f"Удалён чат: {getattr(chat, 'title', 'Чат')} ({chat.id})")
+        await bot.send_message(ADMIN_ID, f"❌ Удалён чат: {getattr(chat, 'title', 'Чат')} ({chat.id})")
 
+# Запуск aiogram
 async def start_aiogram():
     await dp.start_polling()
 
+# Основной запуск
 async def main():
     await asyncio.gather(client.start(), start_aiogram())
 
