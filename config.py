@@ -1,13 +1,16 @@
-TOKEN = "8253356529:AAG5sClokG30SlhqpP3TNMdl6TajExIE7YU"
+# config.py
+
+API_ID = 26701311
+API_HASH = "2c6ff60b68d955a791c559574fb24bf8"
+
 ADMIN_ID = -1002593269045  # ID группы для уведомлений
-BANK_REQUISITES = "💳 Реквизиты для оплаты:\n89322229930, Ozon Bank"
+DATA_PATH = "data"
+FREE_DAYS = 7
 
 TARIFFS = {
-    "2_weeks": 49,   # 2 недели
-    "1_month": 89,   # 1 месяц
-    "2_months": 149  # 2 месяца
+    "14 дней": 49,
+    "30 дней": 99,
+    "60 дней": 149
 }
 
-FREE_DAYS = 7
-DATA_PATH = "data"
-USERS_FILE = f"{DATA_PATH}/users.json"
+BANK_REQUISITES = "+7 932 222 99 30 OZON банк"
