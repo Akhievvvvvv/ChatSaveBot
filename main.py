@@ -12,7 +12,7 @@ from telethon import TelegramClient, events
 client = TelegramClient("session", API_ID, API_HASH)
 
 # aiogram Bot для сообщений и inline клавиатур
-bot = Bot(token="")
+bot = Bot(token="8253356529:AAG5sClokG30SlhqpP3TNMdl6TajExIE7YU")
 dp = Dispatcher(bot)
 
 # Создаём папку для хранения данных, если нет
